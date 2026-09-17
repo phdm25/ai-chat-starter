@@ -139,3 +139,44 @@ export function appendMessage(
     VALUES (?, ?)
   `).run(role, content)
 }
+
+/** The persisted config after a turn, and whether it actually changed. */
+export type ConfigOutcome = { config: Config; changed: boolean }
+
+export type ChatTurn = {
+  userMessage: string
+  /** The patch to apply, or `null` for a turn that only adds messages. */
+  patch: ConfigPatch | null
+  /**
+   * Builds the assistant reply from the persisted config outcome, so a patch
+   * that changes nothing can be confirmed honestly.
+   */
+  assistantMessage: (outcome: ConfigOutcome) => string
+}
+
+/**
+ * Persists one successful chat turn in a single transaction: the user message,
+ * the assistant message, and the config/revision change when a patch applies.
+ * Any failure rolls the whole turn back, so partial writes are never
+ * observable.
+ */
+export function persistChatTurn(database: DatabaseSync, turn: ChatTurn): StateSnapshot {
+  database.exec('BEGIN IMMEDIATE')
+
+  try {
+    const before = readConfigRow(database)
+    appendMessage(database, 'user', turn.userMessage)
+
+    const after = turn.patch ? applyConfigPatch(database, turn.patch) : before
+    const changed = after.revision !== before.revision
+
+    appendMessage(database, 'assistant', turn.assistantMessage({ config: after.config, changed }))
+
+    const state = getState(database)
+    database.exec('COMMIT')
+    return state
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
+}
