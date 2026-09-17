@@ -2,24 +2,9 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-export type Config = {
-  title: string
-  body: string
-  buttonLabel: string
-}
+import type { StateSnapshot, Config, StoredMessage } from '../../shared/contracts.js'
 
-export type StoredMessage = {
-  id: number
-  role: 'user' | 'assistant'
-  content: string
-  createdAt: string
-}
-
-export type AppState = {
-  config: Config
-  revision: number
-  messages: StoredMessage[]
-}
+export type { StateSnapshot, Config, StoredMessage }
 
 const starterConfig: Config = {
   title: 'Welcome',
@@ -59,7 +44,7 @@ export function initializeDatabase(database: DatabaseSync): void {
   `).run(JSON.stringify(starterConfig))
 }
 
-export function getState(database: DatabaseSync): AppState {
+export function getState(database: DatabaseSync): StateSnapshot {
   const row = database.prepare(`
     SELECT config_json, revision
     FROM state
