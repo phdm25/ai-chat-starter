@@ -36,9 +36,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     const userMessage = parsed.data.message
 
+    let state: StateSnapshot
+    try {
+      state = getState(database)
+    } catch {
+      return reply.code(500).send({ error: 'The current state could not be loaded' })
+    }
+
     let result: ChatResult
     try {
-      result = await requestTurn(getState(database), userMessage)
+      result = await requestTurn(state, userMessage)
     } catch {
       // Anthropic failed or returned something unusable: nothing is persisted.
       return reply.code(502).send({ error: 'The assistant is currently unavailable' })
