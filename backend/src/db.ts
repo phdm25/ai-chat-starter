@@ -2,9 +2,15 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import type { StateSnapshot, Config, StoredMessage } from '../../shared/contracts.js'
+import { configSchema } from '../../shared/contracts.js'
+import type {
+  StateSnapshot,
+  Config,
+  ConfigPatch,
+  StoredMessage,
+} from '../../shared/contracts.js'
 
-export type { StateSnapshot, Config, StoredMessage }
+export type { StateSnapshot, Config, ConfigPatch, StoredMessage }
 
 const starterConfig: Config = {
   title: 'Welcome',
@@ -44,7 +50,7 @@ export function initializeDatabase(database: DatabaseSync): void {
   `).run(JSON.stringify(starterConfig))
 }
 
-export function getState(database: DatabaseSync): StateSnapshot {
+function readConfigRow(database: DatabaseSync): { config: Config; revision: number } {
   const row = database.prepare(`
     SELECT config_json, revision
     FROM state
@@ -54,6 +60,15 @@ export function getState(database: DatabaseSync): StateSnapshot {
   if (!row) {
     throw new Error('Application state is not initialized')
   }
+
+  return {
+    config: JSON.parse(row.config_json) as Config,
+    revision: row.revision,
+  }
+}
+
+export function getState(database: DatabaseSync): StateSnapshot {
+  const { config, revision } = readConfigRow(database)
 
   const messageRows = database.prepare(`
     SELECT id, role, content, created_at
@@ -67,8 +82,8 @@ export function getState(database: DatabaseSync): StateSnapshot {
   }>
 
   return {
-    config: JSON.parse(row.config_json) as Config,
-    revision: row.revision,
+    config,
+    revision,
     messages: messageRows.map((message) => ({
       id: message.id,
       role: message.role,
@@ -76,6 +91,42 @@ export function getState(database: DatabaseSync): StateSnapshot {
       createdAt: message.created_at,
     })),
   }
+}
+
+/**
+ * Merges an already validated patch into the stored config, validates the
+ * resulting full config, and persists it with the next revision. Throws
+ * without touching the database if the merged config is invalid, so the
+ * revision only ever moves on a successful config change.
+ */
+export function applyConfigPatch(
+  database: DatabaseSync,
+  patch: ConfigPatch,
+): { config: Config; revision: number } {
+  const current = readConfigRow(database)
+
+  const config = configSchema.parse({
+    title: patch.title ?? current.config.title,
+    body: patch.body ?? current.config.body,
+    buttonLabel: patch.buttonLabel ?? current.config.buttonLabel,
+  })
+
+  const changed =
+    config.title !== current.config.title ||
+    config.body !== current.config.body ||
+    config.buttonLabel !== current.config.buttonLabel
+
+  if (!changed) {
+    return current
+  }
+
+  database.prepare(`
+    UPDATE state
+    SET config_json = ?, revision = revision + 1
+    WHERE id = 1
+  `).run(JSON.stringify(config))
+
+  return { config, revision: current.revision + 1 }
 }
 
 export function appendMessage(

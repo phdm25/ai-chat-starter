@@ -31,6 +31,7 @@ export const configPatchSchema = z
     body: bodySchema.optional(),
     buttonLabel: buttonLabelSchema.optional(),
   })
+  .strict()
   .refine(
     (patch) => configFields.some((field) => patch[field] !== undefined),
     { message: 'Provide at least one of: title, body, buttonLabel' },
